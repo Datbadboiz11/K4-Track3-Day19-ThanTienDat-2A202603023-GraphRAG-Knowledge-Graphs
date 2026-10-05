@@ -1,0 +1,5 @@
+Observed on 2026-10-05: python bench_kg.py --check
+Data, KG-1, Neo4j connectivity and provider initialization succeeded.
+OpenAI call failed with openai.APIConnectionError; underlying httpx.ConnectError: WinError 10013 (socket access forbidden).
+The official benchmark resets the graph before the paid call. Full news graph must be rebuilt using scripts/finalize_project.ps1 outside the restricted environment.
+This is a failure summary, not a fabricated successful check log.

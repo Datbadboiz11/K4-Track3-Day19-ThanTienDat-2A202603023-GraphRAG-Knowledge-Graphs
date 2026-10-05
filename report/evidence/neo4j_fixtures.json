@@ -1,0 +1,58 @@
+{
+  "stats": {
+    "nodes": 150,
+    "relationships": 304
+  },
+  "contexts": {
+    "Q3": {
+      "question": "Lê Minh Thành bị tuyên bao nhiêu tháng tù, về tội gì, và tội đó được quy định tại điều nào của Bộ luật Hình sự với khung hình phạt cơ bản bao nhiêu?",
+      "doc_ids": [
+        "news-100260918080821054"
+      ],
+      "facts": [
+        "[Nguồn news-100260918080821054] Vụ 'Vụ góp tiền mua ma túy tại Hà Nội'. Người: verification-4492d73d:Lê Minh Thành: mua bán trái phép chất ma túy, mức án: 36 tháng tù. Tang vật: MDMA: 5 viên.",
+        "[Nguồn blhs-dieu-251; Điều 251 BLHS - Tội mua bán trái phép chất ma túy] khoản 1: phạt tù từ 02 năm đến 07 năm"
+      ],
+      "chars": 301
+    },
+    "Q4": {
+      "question": "Giang hồ 'Hoàng Nato' bị bắt về hành vi gì, và hành vi đó có thể bị phạt tù tối đa bao nhiêu theo Bộ luật Hình sự?",
+      "doc_ids": [],
+      "facts": [
+        "[Nguồn news-100260920221957595] Vụ 'Vụ Hoàng Nato và các đường dây ma túy'. Người: verification-4492d73d:Dương Minh Tuấn: tổ chức sử dụng trái phép chất ma túy, mức án: chưa có. Tang vật: MDMA: không nêu khối lượng.",
+        "[Nguồn blhs-dieu-255; Điều 255 BLHS - Tội tổ chức sử dụng trái phép chất ma túy] khoản 4: phạt tù 20 năm hoặc tù chung thân"
+      ],
+      "chars": 338
+    },
+    "Q5": {
+      "question": "Cái Quang Huy bị truy tố về tội gì với loại ma túy nào? Với khối lượng MDMA trong vụ này, khoản nào của điều luật tương ứng được áp dụng và khung hình phạt là gì?",
+      "doc_ids": [
+        "news-100260917203001265"
+      ],
+      "facts": [
+        "[Nguồn news-100260917203001265] Vụ 'Vụ vận chuyển ma túy từ Đức qua Nội Bài'. Người: verification-4492d73d:Cái Quang Huy: vận chuyển trái phép chất ma túy, mức án: chưa có. Tang vật: Ketamine: khoảng 406g; MDMA: hơn 9,6kg.",
+        "[Nguồn blhs-dieu-250] Đối chiếu MDMA hơn 9,6kg = hơn 9600 gam với ngưỡng 100 gam: khoản 4 Điều 250 BLHS. Điều kiện: Heroine, Cocaine, Methamphetamine, Amphetamine, MDMA hoặc XLR-11 có khối lượng 100 gam trở lên. Khung: phạt tù 20 năm, tù chung thân hoặc tử hình.",
+        "[Nguồn blhs-dieu-250; Điều 250 BLHS - Tội vận chuyển trái phép chất ma túy] khoản 4: phạt tù 20 năm, tù chung thân hoặc tử hình"
+      ],
+      "chars": 611
+    },
+    "Q6": {
+      "question": "Những vụ việc nào trong tin tức có liên quan đến ma túy MDMA?",
+      "doc_ids": [],
+      "facts": [
+        "[Nguồn news-100260917203001265] Vụ 'Vụ vận chuyển ma túy từ Đức qua Nội Bài'. Người: verification-4492d73d:Cái Quang Huy: vận chuyển trái phép chất ma túy, mức án: chưa có; verification-4492d73d:Nguyễn Tiến Đạt: vận chuyển trái phép chất ma túy, mức án: chưa có. Tang vật: MDMA: hơn 9,6kg.",
+        "[Nguồn news-100260918080821054] Vụ 'Vụ góp tiền mua ma túy tại Hà Nội'. Người: verification-4492d73d:Lê Minh Thành: mua bán trái phép chất ma túy, mức án: 36 tháng tù. Tang vật: MDMA: 5 viên.",
+        "[Nguồn news-100260920221957595] Vụ 'Vụ Hoàng Nato và các đường dây ma túy'. Người: verification-4492d73d:Kim Yu Young: mua bán trái phép chất ma túy, mức án: chưa có; verification-4492d73d:Dương Minh Tuấn: tổ chức sử dụng trái phép chất ma túy, mức án: chưa có. Tang vật: MDMA: không nêu khối lượng.",
+        "[Nguồn news-100260924105118645] Vụ 'Vụ tại Viện Pháp y tâm thần Trung ương'. Người: verification-4492d73d:Lê Văn Đông: tổ chức sử dụng trái phép chất ma túy, mức án: chưa có. Tang vật: MDMA: không nêu khối lượng."
+      ],
+      "chars": 991
+    }
+  },
+  "verification_mode": "Manual source fixtures; no embeddings, LLM, judge, or benchmark scores.",
+  "sources": [
+    "news-100260918080821054",
+    "news-100260920221957595",
+    "news-100260917203001265",
+    "news-100260924105118645"
+  ]
+}

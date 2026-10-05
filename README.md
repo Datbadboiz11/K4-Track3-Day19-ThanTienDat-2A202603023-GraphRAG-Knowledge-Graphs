@@ -1,5 +1,17 @@
 # Day 19 — Knowledge Graph: Flat RAG vs GraphRAG
 
+<!-- PROJECT_STATUS_START -->
+> **Trạng thái bản cải tiến (2026-10-05):** đã sửa truy xuất theo người/tội danh, chuẩn hóa an toàn, định lượng và traces. Test gốc cùng test bổ sung đã đạt; kiểm chứng Neo4j bằng fixtures đã đạt. Benchmark LLM mới chưa chạy được vì môi trường chặn API; ảnh Neo4j chưa chụp được do trình duyệt từ chối quyền truy cập. Kết quả cũ được lưu ở `report/archive/`, không phải kết quả của code cuối cùng.
+<!-- PROJECT_STATUS_END -->
+>
+> Để hoàn tất trên máy có kết nối API, chạy từ thư mục dự án trong PowerShell:
+>
+> ```powershell
+> .\scripts\finalize_project.ps1
+> ```
+>
+> Script kiểm tra chat/embedding trước khi reset Neo4j, chạy test, benchmark ontology gợi ý, `--check`, benchmark cuối cùng, kiểm tra context và cập nhật báo cáo từ output thật. Sau đó chụp ba ảnh bằng truy vấn trong `report/NEO4J_QUERIES.cypher`. Xem `report/REPORT_KG.md` để biết bằng chứng và giới hạn hiện có.
+
 Đọc theo thứ tự:
 
 1. **README.md** (file này): lab về cái gì, vì sao.

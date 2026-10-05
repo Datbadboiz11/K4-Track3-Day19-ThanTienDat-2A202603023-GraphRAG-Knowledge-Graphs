@@ -1,0 +1,4 @@
+[OK] Dữ liệu: 18 điều luật, 20 bài báo
+[OK] KG-1 link_entity
+[OK] Neo4j kết nối được
+[provider] chat = openai:gpt-4o-mini | embedding = openai:text-embedding-3-small

@@ -1,0 +1,1 @@
+Neo4j integration assertions passed: scoped crimes, aliases, mass threshold, aggregation, prompt.

@@ -1,25 +1,39 @@
-"""Custom Knowledge Graph for the lab's frozen law/news corpus.
+"""Knowledge Graph (Neo4j) + GraphRAG over two drug-topic knowledge bases.
 
-Public KG-1..KG-4 contracts are unchanged. Document-owned Article, Clause and Case nodes
-carry doc_id. Shared entities use edge provenance. Person charges are scoped by case_id.
-Pure normalization/mass rules live in graph_rules; scoped Cypher retrieval in graph_context.
-The supplied benchmark and contract tests are not modified.
+Contract (fixed — bench_kg.py and the tests rely on it):
+    link_entity(name, known)                       -> one of `known` or None          (TODO KG-1)
+    build_graph(graph, law_docs, news_docs, llm_fn)   load both KBs into Neo4j      (TODO KG-2)
+        every node created from ONE document carries the property `doc_id`
+    Neo4jGraph.context(question, doc_ids)         -> list[str] facts               (TODO KG-3)
+    GraphRAGAgent.answer(question, top_k)         -> str                           (TODO KG-4)
+
+Everything else in this file is a HINT: one possible ontology (below). Use it as is, change it,
+or design your own — your own ontology + report/ONTOLOGY.md earns the bonus (see SUBMISSION.md).
+
+Suggested ontology (Crime is the bridge between the law KB and the news KB):
+
+    (:Article {id, title, law, doc_id})-[:DEFINES]->(:Crime {name})
+    (:Article)-[:HAS_CLAUSE]->(:Clause {id, number, penalty, text})-[:MENTIONS]->(:Substance {name})
+    (:Case {name, summary, date, doc_id})-[:CHARGED_WITH]->(:Crime)
+    (:Case)-[:INVOLVES {amount}]->(:Substance)
+    (:Case)-[:LOCATED_IN]->(:Location {name})
+    (:Person {name, aliases})-[:INVOLVED_IN {role, sentence, charge}]->(:Case)
 """
 
 from __future__ import annotations
 
-import hashlib
+import difflib
 import json
-import os
 import re
 from pathlib import Path
 from typing import Any, Callable
 
-from .models import Document
-from .store import EmbeddingStore
-from .graph_rules import (SUBSTANCES, SUBSTANCE_SYNONYMS, canonical_substance, clean_name,
-                          find_substances, link_entity, mass_thresholds, normalize_crime, parse_amount)
+from src.models import Document
+from src.store import EmbeddingStore
 
+# Canonical substance names: the ones BLHS Chương XX lists, plus common ones in Vietnamese news.
+SUBSTANCES = ["Heroine", "Cocaine", "Methamphetamine", "Amphetamine", "MDMA", "XLR-11", "Ketamine",
+              "cần sa", "thuốc phiện", "côca"]
 CLAUSE_START = re.compile(r"^(\d+)\.\s", re.MULTILINE)
 FOOTNOTE = re.compile(r"\[\d+\]")
 
@@ -32,6 +46,26 @@ def load_markdown_docs(folder: str | Path) -> list[Document]:
         metadata = {k: json.loads(v) for k, v in re.findall(r'^(\w+): (".*")$', front, re.MULTILINE)}
         docs.append(Document(id=metadata.get("doc_id", path.stem), content=body.strip(), metadata=metadata))
     return docs
+
+def normalize_crime(name: str) -> str:
+    """'Tội Mua bán trái phép chất ma túy' -> 'mua bán trái phép chất ma túy'."""
+    name = re.sub(r"\s+", " ", name.strip().strip("\"'“”").lower())
+    return name.removeprefix("tội ").strip()
+
+def link_entity(name: str, known: list[str], normalize: Callable[[str], str] = normalize_crime) -> str | None:
+    """Map a free-text mention (e.g. a charge written by a journalist) onto one canonical name in `known`."""
+    normalized = {normalize(k): k for k in known}
+    value = normalize(name)
+    if not value:
+        return None
+    if value in normalized:
+        return normalized[value]
+    matches = difflib.get_close_matches(value, list(normalized), n=1, cutoff=0.8)
+    return normalized[matches[0]] if matches else None
+
+def find_substances(text: str) -> list[str]:
+    lowered = text.lower()
+    return [name for name in SUBSTANCES if name.lower() in lowered]
 
 # ----------------------------------------------------------------------------------------------
 # HINT — suggested ontology: extraction helpers
@@ -55,7 +89,6 @@ def parse_law_article(doc: Document) -> dict[str, Any]:
             "penalty": penalty.group(1).rstrip(".") if penalty else "",
             "text": text,
             "substances": find_substances(text),
-            "thresholds_json": json.dumps(mass_thresholds(text), ensure_ascii=False),
         })
     return {
         "id": article_id,
@@ -77,17 +110,9 @@ Chỉ dùng thông tin có trong bài. Trả về JSON đúng dạng:
   "substances": [{{"name": "tên chất, dùng tên chuẩn trong DANH SÁCH CHẤT nếu khớp", "amount": "khối lượng nếu có"}}],
   "people": [{{"name": "họ tên", "aliases": ["biệt danh"], "role": "bị cáo|bị can|nghi phạm|người liên quan|cán bộ",
                "charge": "tội danh của người này (từ DANH SÁCH TỘI DANH) hoặc chuỗi rỗng",
-               "sentence": "mức án nếu có, ví dụ: tử hình, 8 năm tù",
-               "substances": [{{"name": "tên chất", "amount": "tổng khối lượng người này chịu trách nhiệm nếu bài nêu rõ"}}]}}]
+               "sentence": "mức án nếu có, ví dụ: tử hình, 8 năm tù"}}]
 }}]}}
 Bài không nói về vụ việc cụ thể (tuyên truyền, hội nghị...) thì trả về {{"cases": []}}.
-Giữ đầy đủ biệt danh trong ngoặc đơn/ngoặc kép và họ tên tương ứng; không tự tạo biệt danh.
-Không đồng nhất 'sử dụng' với 'tổ chức sử dụng'. Chỉ gắn tội danh cho đúng người được bài nêu.
-Không suy ra loại chất từ cụm 'ma túy tổng hợp'; giữ nguyên cụm này nếu không có kết quả giám định.
-Mỗi chất là một mục riêng. Ghi tổng khối lượng cả vụ, không ghi đè bằng lượng của riêng một lần vận chuyển.
-Nếu bài nêu trách nhiệm khác nhau của từng người, lưu riêng trong people.substances.
-Giữ chữ 'hơn', 'gần', 'khoảng' trong amount; không đổi số viên thành gam.
-Chỉ trích vụ việc trong nội dung chính; bỏ các đoạn giới thiệu bài liên quan ở cuối bài.
 
 DANH SÁCH TỘI DANH: {crimes}
 DANH SÁCH CHẤT: {substances}
@@ -103,59 +128,13 @@ def extract_news_cases(doc: Document, llm_fn: Callable[[str], str], known_crimes
         title=doc.metadata.get("title", ""), content=doc.content[:12000],
     )
     try:
-        payload = json.loads(llm_fn(prompt))
-    except json.JSONDecodeError as error:
-        raise ValueError(f"Invalid extraction JSON for {doc.id}") from error
-    if not isinstance(payload, dict) or not isinstance(payload.get("cases"), list):
-        raise ValueError(f"Expected cases list for {doc.id}")
-    cases = payload["cases"]
-
-    def substances(items):
-        if not isinstance(items, list):
-            raise ValueError(f"Expected substances list for {doc.id}")
-        merged = {}
-        for item in items:
-            if not isinstance(item, dict) or not isinstance(item.get("name"), str):
-                raise ValueError(f"Invalid substance for {doc.id}")
-            name = canonical_substance(item["name"])
-            amount = item.get("amount") or ""
-            if not isinstance(amount, str):
-                raise ValueError(f"Expected amount text for {doc.id}")
-            if name in merged and merged[name]["amount"] != amount:
-                # Preserve conflicting observations instead of silently overwriting a quantity.
-                amount = merged[name]["amount"] + "; " + amount
-            observation = parse_amount(amount)
-            merged[name] = {"name": name, "amount": amount, "amount_g": observation["grams"],
-                            "qualifier": observation["qualifier"]}
-        return list(merged.values())
-
+        cases = json.loads(llm_fn(prompt)).get("cases", [])
+    except (json.JSONDecodeError, AttributeError):
+        return []
     for case in cases:
-        if not isinstance(case, dict) or not isinstance(case.get("people", []), list):
-            raise ValueError(f"Invalid case for {doc.id}")
-        name = case.get("name") or doc.metadata.get("title", doc.id)
-        if not isinstance(name, str):
-            raise ValueError(f"Expected case name for {doc.id}")
-        case["id"] = doc.id + ":" + hashlib.sha256(clean_name(name).encode()).hexdigest()[:12]
-        charges = case.get("charges", [])
-        if not isinstance(charges, list) or any(not isinstance(c, str) for c in charges):
-            raise ValueError(f"Invalid charges for {doc.id}")
-        case["charges"] = sorted({c for c in (link_entity(x, known_crimes) for x in charges) if c})
+        case["charges"] = sorted({c for c in (link_entity(x, known_crimes) for x in case.get("charges", [])) if c})
         for person in case.get("people", []):
-            if not isinstance(person, dict) or not isinstance(person.get("name"), str):
-                raise ValueError(f"Invalid person for {doc.id}")
             person["charge"] = link_entity(person.get("charge") or "", known_crimes) or ""
-            person["role"] = person.get("role") or "người liên quan"
-            person["sentence"] = person.get("sentence") or ""
-            aliases = person.get("aliases") or []
-            if not isinstance(aliases, list) or any(not isinstance(a, str) for a in aliases):
-                raise ValueError(f"Invalid aliases for {doc.id}")
-            person["aliases"] = sorted({a for a in aliases if clean_name(a) in clean_name(doc.content)})
-            explicit = re.search(re.escape(clean_name(person['name'])) +
-                                 r"[^\n]{0,100}?tức\s*[\"'“‘]([^\"'”’]+)", clean_name(doc.content))
-            if explicit and explicit.group(1) not in [clean_name(a) for a in person['aliases']]:
-                person['aliases'].append(explicit.group(1))
-            person["substances_json"] = json.dumps(substances(person.get("substances", [])), ensure_ascii=False)
-        case["substances"] = substances(case.get("substances", []))
     return cases
 
 # ----------------------------------------------------------------------------------------------
@@ -229,7 +208,7 @@ class Neo4jGraph:
     # ---------------------------------------------------------------- HINT — suggested ontology: writes
 
     def suggested_constraints(self) -> None:
-        for label, key in [("Article", "id"), ("Clause", "id"), ("Crime", "name"), ("Case", "id"),
+        for label, key in [("Article", "id"), ("Clause", "id"), ("Crime", "name"), ("Case", "name"),
                            ("Substance", "name"), ("Person", "name"), ("Location", "name")]:
             self.run(f"CREATE CONSTRAINT IF NOT EXISTS FOR (n:{label}) REQUIRE n.{key} IS UNIQUE")
 
@@ -242,8 +221,7 @@ class Neo4jGraph:
             WITH a
             UNWIND $clauses AS clause
             MERGE (cl:Clause {id: clause.id})
-              SET cl.number = clause.number, cl.penalty = clause.penalty, cl.text = clause.text,
-                  cl.doc_id = $doc_id, cl.thresholds_json = clause.thresholds_json
+              SET cl.number = clause.number, cl.penalty = clause.penalty, cl.text = clause.text, cl.doc_id = $doc_id
             MERGE (a)-[:HAS_CLAUSE]->(cl)
             FOREACH (s IN clause.substances | MERGE (sub:Substance {name: s}) MERGE (cl)-[:MENTIONS]->(sub))
             """,
@@ -253,67 +231,67 @@ class Neo4jGraph:
     def add_news_case(self, case: dict, doc: Document) -> None:
         self.run(
             """
-            MERGE (k:Case {id: $case_id})
-              SET k.name = $name, k.summary = $summary, k.date = $date, k.doc_id = $doc_id,
-                  k.source_title = $title, k.source_url = $source_url
+            MERGE (k:Case {name: $name})
+              SET k.summary = $summary, k.date = $date, k.doc_id = $doc_id, k.source_title = $title
             FOREACH (loc IN CASE WHEN $location = '' THEN [] ELSE [$location] END |
                 MERGE (l:Location {name: loc}) MERGE (k)-[:LOCATED_IN]->(l))
             FOREACH (crime IN $charges | MERGE (c:Crime {name: crime}) MERGE (k)-[:CHARGED_WITH]->(c))
             FOREACH (s IN $substances | MERGE (sub:Substance {name: s.name}) MERGE (k)-[r:INVOLVES]->(sub)
-                SET r.amount = s.amount, r.amount_g = s.amount_g, r.qualifier = s.qualifier, r.doc_id = $doc_id)
+                SET r.amount = s.amount)
             FOREACH (p IN $people | MERGE (person:Person {name: p.name})
-                SET person.aliases = reduce(acc = coalesce(person.aliases, []), alias IN p.aliases |
-                    CASE WHEN alias IN acc THEN acc ELSE acc + alias END)
-                MERGE (person)-[r:INVOLVED_IN]->(k)
-                  SET r.role = p.role, r.charge = p.charge, r.sentence = p.sentence,
-                      r.doc_id = $doc_id, r.substances_json = p.substances_json
-                FOREACH (crime_name IN CASE WHEN p.charge = '' THEN [] ELSE [p.charge] END |
-                    MERGE (pc:Crime {name: crime_name})
-                    MERGE (person)-[pr:CHARGED_WITH {case_id: $case_id}]->(pc)
-                    SET pr.sentence = p.sentence, pr.doc_id = $doc_id
-                )
-            )
+                SET person.aliases = coalesce(p.aliases, [])
+                MERGE (person)-[r:INVOLVED_IN]->(k) SET r.role = p.role, r.charge = p.charge, r.sentence = p.sentence)
             """,
-            case_id=case["id"], name=case.get("name") or doc.metadata.get("title", doc.id),
+            name=case.get("name") or doc.metadata.get("title", doc.id),
             summary=case.get("summary", ""), date=case.get("date", ""), location=case.get("location", ""),
             charges=case.get("charges", []), people=[p for p in case.get("people", []) if p.get("name")],
             substances=[s for s in case.get("substances", []) if s.get("name")],
-            doc_id=doc.id, title=doc.metadata.get("title", ""), source_url=doc.metadata.get("source_url", ""),
+            doc_id=doc.id, title=doc.metadata.get("title", ""),
         )
 
     # ---------------------------------------------------------------- KG-3
 
     def context(self, question: str, doc_ids: list[str], max_facts: int = 60) -> list[str]:
-        from .graph_context import context
-        return context(self, question, doc_ids, max_facts=max_facts)
+        ids, facts = self.seed_facts(question, doc_ids, skip_labels=("Clause",))
+        cases = self.run(
+            "MATCH (k:Case) WHERE elementId(k) IN $ids OR EXISTS { MATCH (s)--(k) WHERE elementId(s) IN $ids } "
+            "RETURN elementId(k) AS id, k.name AS name, k.summary AS summary", ids=ids)
+        facts += [f"Vụ việc '{r['name']}': {r['summary']}" for r in cases]
+        rows = self.run(
+            "MATCH (k:Case)-[:CHARGED_WITH]->(:Crime)<-[:DEFINES]-(a:Article)-[:HAS_CLAUSE]->(cl:Clause) "
+            "WHERE elementId(k) IN $ids "
+            "AND (cl.number=1 OR EXISTS { MATCH (k)-[:INVOLVES]->(s:Substance)<-[:MENTIONS]-(cl) }) "
+            "RETURN DISTINCT a.id AS article_id,a.title AS title,cl.number AS number,cl.text AS text "
+            "ORDER BY article_id,number", ids=[r['id'] for r in cases])
+        numbers = re.findall(r"[Đđ]iều\s+(\d+)", question)
+        if numbers:
+            rows += self.run(
+                "MATCH (a:Article)-[:HAS_CLAUSE]->(cl:Clause) "
+                "WHERE any(n IN $numbers WHERE a.id CONTAINS 'Điều '+n) "
+                "AND (cl.number=1 OR EXISTS { MATCH (cl)-[:MENTIONS]->(s:Substance) WHERE s.name IN $substances }) "
+                "RETURN a.id AS article_id,a.title AS title,cl.number AS number,cl.text AS text "
+                "ORDER BY article_id,number", numbers=numbers,substances=find_substances(question))
+        facts += [f"[{r['article_id']} - {r['title']}] khoản {r['number']}: {r['text']}" for r in rows]
+        return list(dict.fromkeys(facts))[:max_facts]
 
 # ---------------------------------------------------------------------------------------------- KG-2
 
 def build_graph(graph: Neo4jGraph, law_docs: list[Document], news_docs: list[Document],
                 llm_fn: Callable[..., str]) -> None:
-    """Load both KBs into Neo4j with custom ontology and canonical entity linking."""
-    articles = [parse_law_article(d) for d in law_docs]
-    known_crimes = [a["crime"] for a in articles if a.get("crime")]
-    # Validate all responses before performing ingestion writes.
-    extracted = []
-    for d in news_docs:
-        cases = extract_news_cases(d, lambda p: llm_fn(p, json_mode=True), known_crimes)
-        extracted.append((d, cases))
+    """Load both KBs into an empty graph. llm_fn(prompt, json_mode=False) -> str (metered OpenAI chat)."""
     graph.suggested_constraints()
+    articles = [parse_law_article(d) for d in law_docs]
     for article in articles:
         graph.add_law_article(article)
-    for d, cases in extracted:
-        for case in cases:
-            graph.add_news_case(case, d)
+    crimes = [a['crime'] for a in articles if a['crime']]
+    for doc in news_docs:
+        for case in extract_news_cases(doc, lambda p: llm_fn(p, json_mode=True), crimes):
+            graph.add_news_case(case, doc)
 
 # ---------------------------------------------------------------------------------------------- KG-4
 
 GRAPH_PROMPT = """Trả lời câu hỏi chỉ dựa trên ngữ cảnh (đoạn văn bản và dữ kiện từ knowledge graph).
-Nêu rõ số Điều và khoản theo đúng tội danh của người được hỏi; không lấy tội của người khác trong cùng vụ.
-Nếu có dữ kiện đối chiếu định lượng, dùng đúng Điều/khoản trong dữ kiện đó và giữ nguyên đơn vị, chữ hơn/gần/khoảng.
-Khi hỏi mức tối đa, nêu khung cao nhất của tội đó; không coi đây là mức án thực tế đã tuyên cho người bị bắt.
-Khi liệt kê vụ việc, nêu tên vụ, họ tên người liên quan và nguồn. Không khẳng định đầy đủ nếu dữ kiện chưa đủ.
-Trích nguồn ngắn bằng doc_id có trong dữ kiện hoặc [số đoạn]. Nếu thiếu thông tin, nêu phần đã biết và phần còn thiếu.
+Nêu rõ số Điều luật khi có. Nếu ngữ cảnh không đủ, nói không đủ thông tin.
 
 Dữ kiện knowledge graph:
 {facts}
@@ -334,23 +312,7 @@ class GraphRAGAgent:
 
     def answer(self, question: str, top_k: int = 3) -> str:
         chunks = self.store.search(question, top_k=top_k)
-        doc_ids = []
-        for c in chunks:
-            did = c.get("metadata", {}).get("doc_id")
-            if did and did not in doc_ids:
-                doc_ids.append(did)
+        doc_ids = list(dict.fromkeys(c.get('metadata', {}).get('doc_id') for c in chunks if c.get('metadata', {}).get('doc_id')))
         facts = self.graph.context(question, doc_ids)
-        facts_text = "\n".join(f"- {f}" for f in facts) if facts else "Không có dữ kiện đồ thị."
-        chunks_text = "\n\n".join(f"[{i}] {c['content']}" for i, c in enumerate(chunks, start=1))
-        prompt = GRAPH_PROMPT.format(facts=facts_text, chunks=chunks_text, question=question)
-        answer = self.llm_fn(prompt)
-        self.last_trace = {"question": question, "top_k": top_k, "doc_ids": doc_ids,
-                           "chunks": chunks, "facts": facts, "prompt": prompt, "answer": answer}
-        trace_dir = os.getenv("GRAPH_TRACE_DIR")
-        if trace_dir:
-            folder = Path(trace_dir)
-            folder.mkdir(parents=True, exist_ok=True)
-            key = hashlib.sha256(question.encode()).hexdigest()[:12]
-            (folder / f"{key}.json").write_text(
-                json.dumps(self.last_trace, ensure_ascii=False, indent=2), encoding="utf-8")
-        return answer
+        return self.llm_fn(GRAPH_PROMPT.format(facts="\n".join(facts),
+            chunks="\n\n".join(f"[{i}] {c['content']}" for i,c in enumerate(chunks,1)), question=question))
